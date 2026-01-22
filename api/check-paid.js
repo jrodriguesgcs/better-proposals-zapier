@@ -58,6 +58,7 @@ export default async function handler(req, res) {
             quarterly_total: proposal.QuarterlyTotal,
             annual_total: proposal.AnnualTotal,
             tax_percentage: proposal.TaxPercentage,
+            brand_id: proposal.BrandID,
             webhook_sent_at: new Date().toISOString()
           };
           await fetch(ZAPIER_WEBHOOK_URL, {
