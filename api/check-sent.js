@@ -1,6 +1,7 @@
-import { getApiKeys, verifyCronSecret, fetchProposals, isProcessed, markAsProcessed } from '../lib/utils.js';
+import { getApiKeys, verifyCronSecret, fetchProposals, getLastRun, setLastRun, filterNewProposals } from '../lib/utils.js';
 
-const REDIS_KEY = 'processed_sent';
+const REDIS_KEY = 'last_run_sent';
+const DATE_FIELD = 'OriginalDateSent';
 
 export default async function handler(req, res) {
   if (!verifyCronSecret(req)) {
@@ -15,63 +16,65 @@ export default async function handler(req, res) {
   }
   try {
     const apiKeys = getApiKeys();
+    const lastRun = await getLastRun(REDIS_KEY);
+    const currentRun = new Date().toISOString();
     let newCount = 0;
     let totalChecked = 0;
     let errors = [];
     for (let i = 0; i < apiKeys.length; i++) {
       const proposals = await fetchProposals(apiKeys[i], 'sent', i);
       totalChecked += proposals.length;
-      for (const proposal of proposals) {
+      const newProposals = filterNewProposals(proposals, lastRun, DATE_FIELD);
+      for (const proposal of newProposals) {
         try {
-          const alreadyProcessed = await isProcessed(REDIS_KEY, proposal.ID);
-          if (!alreadyProcessed) {
-            const emails = proposal.Contacts?.map(c => c.Email).filter(Boolean) || [];
-            const primaryContact = proposal.Contacts?.[0] || {};
-            const payload = {
-              event_type: 'proposal_sent',
-              proposal_id: proposal.ID,
-              account_number: proposal._accountIndex,
-              sender_email: proposal._senderEmail,
-              sender_name: proposal._senderName,
-              company_name: proposal.CompanyName,
-              subject_line: proposal.SubjectLine,
-              date_sent: proposal.OriginalDateSent,
-              date_created: proposal.DateCreated,
-              primary_email: primaryContact.Email || '',
-              primary_first_name: primaryContact.FirstName || '',
-              primary_surname: primaryContact.Surname || '',
-              primary_contact_link: primaryContact.Link || '',
-              all_contact_emails: emails,
-              preview_url: proposal.Preview,
-              proposal_view_url: proposal.ProposalView,
-              currency_code: proposal.CurrencyCode,
-              currency_symbol: proposal.CurrencySymbol,
-              one_off_total: proposal.OneOffTotal,
-              monthly_total: proposal.MonthlyTotal,
-              quarterly_total: proposal.QuarterlyTotal,
-              annual_total: proposal.AnnualTotal,
-              tax_percentage: proposal.TaxPercentage,
-              webhook_sent_at: new Date().toISOString()
-            };
-            await fetch(ZAPIER_WEBHOOK_URL, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-            await markAsProcessed(REDIS_KEY, proposal.ID);
-            newCount++;
-          }
+          const emails = proposal.Contacts?.map(c => c.Email).filter(Boolean) || [];
+          const primaryContact = proposal.Contacts?.[0] || {};
+          const payload = {
+            event_type: 'proposal_sent',
+            proposal_id: proposal.ID,
+            account_number: proposal._accountIndex,
+            sender_email: proposal._senderEmail,
+            sender_name: proposal._senderName,
+            company_name: proposal.CompanyName,
+            subject_line: proposal.SubjectLine,
+            date_sent: proposal.OriginalDateSent,
+            date_created: proposal.DateCreated,
+            primary_email: primaryContact.Email || '',
+            primary_first_name: primaryContact.FirstName || '',
+            primary_surname: primaryContact.Surname || '',
+            primary_contact_link: primaryContact.Link || '',
+            all_contact_emails: emails,
+            preview_url: proposal.Preview,
+            proposal_view_url: proposal.ProposalView,
+            currency_code: proposal.CurrencyCode,
+            currency_symbol: proposal.CurrencySymbol,
+            one_off_total: proposal.OneOffTotal,
+            monthly_total: proposal.MonthlyTotal,
+            quarterly_total: proposal.QuarterlyTotal,
+            annual_total: proposal.AnnualTotal,
+            tax_percentage: proposal.TaxPercentage,
+            webhook_sent_at: new Date().toISOString()
+          };
+          await fetch(ZAPIER_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          newCount++;
         } catch (err) {
           errors.push(`Proposal ${proposal.ID}: ${err.message}`);
         }
       }
     }
+    await setLastRun(REDIS_KEY, currentRun);
     res.status(200).json({
       success: true,
       event_type: 'sent',
       accounts_checked: apiKeys.length,
       total_found: totalChecked,
       new_sent: newCount,
+      last_run: lastRun,
+      current_run: currentRun,
       errors: errors.length
     });
   } catch (error) {
