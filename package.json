@@ -1,0 +1,11 @@
+{
+  "name": "better-proposals-zapier",
+  "version": "1.0.0",
+  "description": "Monitors Better Proposals accounts for sent, signed, and paid proposals",
+  "engines": {
+    "node": "18.x"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.28.0"
+  }
+}
